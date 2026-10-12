@@ -461,8 +461,12 @@ ${navigator.userAgent}`;
     return showResult("저장하지 못했어요", "휴대폰 저장 공간을 확인하고 한 번 더 찍어 주세요.", "다시 찍기", openCamera);
   }
   activeSubmission = stored.clientSubmissionId;
+  const ts = performance.now();
   const r = await outbox.send(stored, sendOpts());   // 자동 재전송과 겹치면 같은 전송 결과를 함께 받음
   activeSubmission = null;
+  // 시험 기록: 보내기를 누른 뒤 결과까지 걸린 시간. 서버 기록의 처리 시간을 빼면 올리는 데 걸린 시간이 나온다
+  reportClientError("send-timing", new Error(`${Math.round(performance.now() - ts)}ms`), {
+    ms: Math.round(performance.now() - ts), http: r.http ?? null, bytes: stored.blob?.size, photoId: stored.clientSubmissionId });
   $("working-text").textContent = "얼굴과 번호판을 가리고 있어요";
   updatePending();
   handleResponse(r, test);
