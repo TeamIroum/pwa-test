@@ -63,23 +63,56 @@ $("model-retry").onclick = prepare;
 let patrol = null;
 let stopIdx = 0;
 
+// 순회 정보는 화면을 열 때 미리 받아 둔다. 휴대폰에서 터널을 거치면 요청 두 번에 1~2초가 걸려
+// 누른 뒤에 받으면 반응이 느려 보인다. 누르면 미리 받은 것으로 바로 보여 주고, 최신 상태는 뒤에서 다시 받는다
+let patrolPrefetch = null;
+const prefetchPatrol = () => (patrolPrefetch = fetchPatrol().catch(() => null));
+
 $("start").onclick = async () => {
-  // 대기 사진이 지워지지 않게 저장소 유지를 요청 (아이폰은 공간이 부족하면 지울 수 있음)
-  try { await navigator.storage?.persist?.(); } catch { /* 지원 안 함 */ }
+  // 대기 사진이 지워지지 않게 저장소 유지를 요청 (아이폰은 공간이 부족하면 지울 수 있음). 기다리지 않는다
+  navigator.storage?.persist?.().catch(() => {});
+  const btn = $("start"), label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "여는 중…";
+  const t0 = performance.now();
+  let early = null;
   try {
-    await loadPatrol();
+    early = await patrolPrefetch;
+    if (early) {
+      applyPatrol(early);
+      showStop();
+      // 미리 받은 뒤 바뀐 상태 반영. 그새 촬영으로 넘어갔으면 건드리지 않는다
+      fetchPatrol().then((p) => { if (!$("stop").hidden) { applyPatrol(p); showStop(); } }).catch(() => {});
+    } else {
+      await loadPatrol();
+      showStop();
+    }
   } catch (e) {
-    return alert(`순회 정보를 받지 못했어요.\n${e.message}`);
+    alert(`순회 정보를 받지 못했어요.
+${e.message}`);
+  } finally {
+    btn.textContent = label;
+    btn.disabled = !masking.ready();
+    prefetchPatrol();   // 처음 화면으로 돌아와 다시 누를 때를 위해
   }
-  showStop();
+  const ms = Math.round(performance.now() - t0);
+  if (ms > 1500) reportClientError("slow-start", new Error(`${ms}ms`), { ms, prefetched: Boolean(early) });
 };
 
-async function loadPatrol() {
+async function fetchPatrol() {
   const list = await api("GET", "/me/patrols");
   if (!list.items?.length) throw new Error("오늘 배정된 순회가 없어요.");
-  patrol = await api("GET", `/patrols/${list.items[0].id}`);
+  return api("GET", `/patrols/${list.items[0].id}`);
+}
+
+function applyPatrol(p) {
+  patrol = p;
   const first = patrol.stops.findIndex((s) => s.captureSlots.some((c) => !isResolved(c)));
   stopIdx = first < 0 ? 0 : first;
+}
+
+async function loadPatrol() {
+  applyPatrol(await fetchPatrol());
 }
 
 const isResolved = (slot) => ["ACCEPTED", "REVIEW_REQUESTED"].includes(slot.captureStatus);
@@ -593,4 +626,5 @@ setNet();
 renderModels();
 updatePending();
 flushOutbox();
+prefetchPatrol();
 prepare();
