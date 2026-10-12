@@ -66,7 +66,7 @@ async function sendOnce(item, { apiBase }) {
   fd.append("deviceMaskReport", JSON.stringify(item.deviceMaskReport));
   // 시험용 업무 API만 받는 시험 정보 (휴대폰 가림 처리 시간·크기). 검증 콘솔 기록에 남는다. 사진 내용은 없음
   if (item.test) fd.append("testClient", JSON.stringify({ maskTimings: item.test.timings, size: item.test.size,
-    bytes: item.blob?.size, source: item.test.source, userAgent: navigator.userAgent }));
+    bytes: item.blob?.size, source: item.test.source, burst: item.test.burst, userAgent: navigator.userAgent }));
   if (item.location) {
     fd.append("latitude", item.location.latitude);
     fd.append("longitude", item.location.longitude);

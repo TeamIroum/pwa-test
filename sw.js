@@ -1,9 +1,9 @@
 // 서비스 워커: 앱 화면·마스킹 모델·검출 라이브러리만 캐시한다.
 // 사진(원본·가린 사진)과 업무 API 응답은 캐시하지 않는다. 가린 사진은 IndexedDB 대기함에만 있다.
-const VERSION = "pwa-test-19";
+const VERSION = "pwa-test-21";
 const SHELL = `shell-${VERSION}`;
 const MODELS = "models-v1";        // 모델 주소에 내용 해시(?v=)가 붙어 있어 주소가 같으면 내용도 같다
-const SHELL_FILES = ["./", "index.html", "app.js", "masking.js", "outbox.js", "download.js", "style.css",
+const SHELL_FILES = ["./", "index.html", "app.js", "masking.js", "outbox.js", "download.js", "quality.js", "style.css",
   "manifest.webmanifest", "icon.svg", "lib/yunet.mjs", "model-manifest.json", "config.js"];
 
 self.addEventListener("install", (e) => {
@@ -42,7 +42,8 @@ async function cacheFirst(req, name) {
 
 async function networkFirst(req, name) {
   try {
-    const resp = await fetch(req);
+    // 브라우저 HTTP 캐시(GitHub Pages는 10분)를 건너뛰고 서버에 바뀌었는지 확인한다. 안 바뀌었으면 304라 데이터가 거의 안 듦
+    const resp = await fetch(req, { cache: "no-cache" });
     if (resp.ok) (await caches.open(name)).put(req, resp.clone());
     return resp;
   } catch (err) {

@@ -2,6 +2,7 @@
 // 앱은 AI 모듈을 부르지 않고 업무 API(/api/v1)만 부른다. 판독 결과는 어르신 화면에 보이지 않는다.
 import * as masking from "./masking.js";
 import * as outbox from "./outbox.js";
+import * as quality from "./quality.js";
 
 const APP_VERSION = "pwa-test-0.1.0";
 const $ = (id) => document.getElementById(id);
@@ -242,17 +243,42 @@ function getLocation() {
 
 let pending = null;   // 확인 화면에 띄운 가린 사진 (원본 아님)
 
+// 사진은 카메라 영상에서 떼어 온 장면이라 셔터를 누르는 순간의 흔들림이 그대로 찍힌다.
+// 누른 뒤 약 0.3초 동안 몇 장면을 떼어 가장 선명한 것을 쓴다 (서버와 같은 선명도 계산, quality.js)
+const BURST_FRAMES = 5;
+const BURST_GAP_MS = 70;
+let lastBurst = null;   // 시험 정보: 고른 장면과 선명도
+
 async function capture() {
   const video = $("video");
   if (!video.videoWidth) return;
   shutterSound();
   flashScreen();
   const capturedAt = new Date().toISOString();
-  const raw = document.createElement("canvas");
-  raw.width = video.videoWidth;
-  raw.height = video.videoHeight;
-  raw.getContext("2d").drawImage(video, 0, 0);   // 사진은 셔터를 누른 순간의 화면
+  let raw = null, spare = null, best = null;
+  for (let i = 0; i < BURST_FRAMES; i++) {
+    if (i) await new Promise((r) => setTimeout(r, BURST_GAP_MS));
+    const c = spare || document.createElement("canvas");
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    c.getContext("2d").drawImage(video, 0, 0);
+    const q = quality.measure(c);
+    if (!best || q.sharpness > best.sharpness) { spare = raw; raw = c; best = { ...q, frame: i }; } else spare = c;
+  }
+  lastBurst = { frames: BURST_FRAMES, picked: best.frame, sharpness: Math.round(best.sharpness * 10) / 10 };
+  if (spare) spare.width = spare.height = 0;   // 고르지 않은 장면은 바로 버린다 (원본을 남기지 않음)
   closeCamera();
+
+  // 확실히 흐리거나 어두우면 올리지 않고 바로 다시 찍게 한다 (서버도 같은 기준으로 거절하므로 기다림·데이터만 아낌)
+  const bad = quality.problem(best);
+  if (bad) {
+    raw.width = raw.height = 0;
+    reportClientError("quality-local", new Error(bad), {
+      sharpness: Math.round(best.sharpness * 10) / 10, brightness: Math.round(best.brightness * 10) / 10 });
+    return showResult(bad === "dark" ? "사진이 어두워요" : "사진이 흐려요",
+      bad === "dark" ? "밝은 쪽에서 다시 찍어 주세요." : "휴대폰을 잠깐 멈추고 한 번 더 찍어 주세요.",
+      "다시 찍기", openCamera);
+  }
   show("working");
   // 가리기 계산은 화면 그리기를 1~3초 막는다(아이폰 WASM). 번쩍임이 실제로 그려진 뒤에 시작해야 보인다
   await afterPaint(250);
@@ -287,7 +313,8 @@ async function processRaw(raw, capturedAt, source) {
     patrolId: patrol.id, stopId: stop.id, stopName: stop.name, captureSlotId: slot.id,
     capturedAt, maskingVersion: masking.maskingVersion(), deviceMaskReport: masked.report,
     blob: masked.blob, location: await locationP,
-    test: { boxes: masked.boxes, size: masked.size, timings: masked.timings, blur: masked.blur, source },
+    test: { boxes: masked.boxes, size: masked.size, timings: masked.timings, blur: masked.blur, source,
+      burst: fromFile ? null : lastBurst },
   };
   if (cfg.preview || fromFile) return showPreview(pending);   // 파일 시험은 항상 가린 결과를 보여 줌
   submit(pending);
