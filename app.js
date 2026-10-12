@@ -287,7 +287,8 @@ async function capture() {
 
 async function measureBlob(blob) {
   const bmp = await createImageBitmap(blob);
-  try { return quality.measure(bmp); } finally { bmp.close(); }
+  // fast는 시험 기록용: 브라우저 줄이기 값과 비교해 기기 차이를 본다
+  try { return { ...quality.measure(bmp, { exact: true }), fast: quality.measure(bmp).sharpness }; } finally { bmp.close(); }
 }
 
 function afterPaint(ms) {
@@ -315,7 +316,8 @@ async function processRaw(raw, capturedAt, source) {
   const tq = performance.now();
   const sent = await measureBlob(masked.blob);
   masked.timings.check = Math.round(performance.now() - tq);
-  if (lastBurst && !fromFile) lastBurst.sentSharpness = Math.round(sent.sharpness * 10) / 10;
+  if (lastBurst && !fromFile) Object.assign(lastBurst, {
+    sentSharpness: Math.round(sent.sharpness * 10) / 10, sentSharpnessFast: Math.round(sent.fast * 10) / 10 });
   const bad = quality.problem(sent);
   if (bad) {
     reportClientError("quality-local", new Error(bad), { source, after: "encode",
