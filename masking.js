@@ -5,6 +5,7 @@
 //   - 실패하면 예외를 던진다. 부른 쪽은 사진을 버리고 다시 찍게 한다 (가리지 못한 사진은 전송·저장 경로가 없음).
 //   - 사진·캔버스 내용은 콘솔에 찍지 않는다.
 import { detectFaces } from "./lib/yunet.mjs";
+import { download, importRetry } from "./download.js";
 
 const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
 const MP_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/";
@@ -38,37 +39,60 @@ export function loadModels(onChange = () => {}) {
   return loading;
 }
 
+// 처음 열 때 받는 양이 약 20MB라 느린 회선(예: 1Mbps 데이터)에서는 몇 분 걸리고 중간에 끊기기 쉽다.
+//   - 하나씩 차례로 받는다 (얼굴 → 번호판 → 차량). 동시에 받으면 셋 다 느려져 끊길 확률이 커진다.
+//   - 끊기면 잠시 뒤 받은 곳부터 이어 받는다(Range). 모델은 받은 뒤 내용 해시(주소의 ?v=)를 확인한다.
+//   - 다 받은 파일은 바로 캐시에 둔다. 앱을 닫았다 열어도 남은 것만 받는다.
+// 셋이 모두 준비되기 전에는 촬영하지 않는다 (차량을 못 가린 사진이 생기지 않게. 원본은 붙잡아 두지 않음).
 async function doLoad(onChange) {
   const set = (k, v) => { status[k] = v; onChange(); };
   const manifest = await (await fetch(new URL("./model-manifest.json", import.meta.url), { cache: "no-cache" })).json();
   Object.assign(MODEL_FILES, Object.fromEntries(
     Object.entries(manifest.files).map(([k, u]) => [k, new URL(u, import.meta.url).href])));
   modelVersion = manifest.version;
-  ort = await import(`${ORT_URL}ort.wasm.min.mjs`);
-  ort.env.wasm.wasmPaths = ORT_URL;
-  // 여러 스레드는 교차 출처 격리(COOP/COEP)가 있어야 켜짐 (안내서 7장)
-  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
-  status.backend = `wasm ×${ort.env.wasm.numThreads}`;
   const opts = { executionProviders: ["wasm"] };
-
-  const jobs = [
-    (async () => { set("face", "받는 중"); faceSession = await ort.InferenceSession.create(MODEL_FILES.face, opts); set("face", "준비"); })(),
-    (async () => { set("plate", "받는 중"); plateSession = await ort.InferenceSession.create(MODEL_FILES.plate, opts); set("plate", "준비"); })(),
-    (async () => {
-      set("vehicle", "받는 중");
-      const { FilesetResolver, ObjectDetector } = await import(`${MP_URL}vision_bundle.mjs`);
+  const steps = [
+    ["face", async (dl) => {
+      if (!ort) {
+        const wasm = await dl(`${ORT_URL}ort-wasm-simd-threaded.wasm`, { what: "실행기" });
+        ort = await importRetry(`${ORT_URL}ort.wasm.min.mjs`, dl.onState);
+        ort.env.wasm.wasmPaths = ORT_URL;
+        ort.env.wasm.wasmBinary = wasm;
+        // 여러 스레드는 교차 출처 격리(COOP/COEP)가 있어야 켜짐 (안내서 7장)
+        ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
+        status.backend = `wasm ×${ort.env.wasm.numThreads}`;
+      }
+      faceSession = await ort.InferenceSession.create(await dl(MODEL_FILES.face, { model: true }), opts);
+    }],
+    ["plate", async (dl) => {
+      plateSession = await ort.InferenceSession.create(await dl(MODEL_FILES.plate, { model: true }), opts);
+    }],
+    ["vehicle", async (dl) => {
+      const { FilesetResolver, ObjectDetector } = await importRetry(`${MP_URL}vision_bundle.mjs`, dl.onState);
       const fileset = await FilesetResolver.forVisionTasks(`${MP_URL}wasm`);
+      const wasm = await dl(fileset.wasmBinaryPath, { what: "실행기" });
+      fileset.wasmBinaryPath = URL.createObjectURL(new Blob([wasm], { type: "application/wasm" }));
       vehicleDetector = await ObjectDetector.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: MODEL_FILES.vehicle, delegate: "CPU" },
+        baseOptions: { modelAssetBuffer: await dl(MODEL_FILES.vehicle, { model: true }), delegate: "CPU" },
         runningMode: "IMAGE", scoreThreshold: VEHICLE_CONF, maxResults: -1, categoryAllowlist: VEHICLE_LABELS,
       });
-      set("vehicle", "준비");
-    })(),
+    }],
   ];
-  const results = await Promise.allSettled(jobs);
-  results.forEach((r, i) => { if (r.status === "rejected") set(["face", "plate", "vehicle"][i], "실패"); });
-  const failed = results.find((r) => r.status === "rejected");
-  if (failed) throw new Error(`모델을 불러오지 못했습니다: ${failed.reason?.message || failed.reason}`);
+  const done = { face: () => faceSession, plate: () => plateSession, vehicle: () => vehicleDetector };
+  for (const [key, step] of steps) {
+    if (done[key]()) continue;                              // 다시 준비하기: 이미 된 것은 건너뜀
+    const onState = (s) => set(key, s);
+    const dl = Object.assign((url, o = {}) => download(url, { ...o, onState }), { onState });
+    try {
+      set(key, "받는 중");
+      await step(dl);
+      set(key, "준비");
+    } catch (e) {
+      set(key, "실패");
+      for (const k of Object.keys(done)) if (!done[k]() && status[k] !== "실패") set(k, "대기");
+      throw new Error(`모델을 불러오지 못했습니다: ${e?.message || e}`);
+    }
+  }
 }
 
 export const ready = () => Boolean(faceSession && plateSession && vehicleDetector);

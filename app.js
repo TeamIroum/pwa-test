@@ -42,14 +42,14 @@ function renderModels() {
 
 async function prepare() {
   $("model-retry").hidden = true;
-  $("model-msg").textContent = "처음에는 모델을 내려받느라 시간이 걸려요 (약 15MB).";
+  $("model-msg").textContent = "처음 한 번은 가림 모델을 내려받아요 (약 20MB). Wi-Fi에서 열면 빨라요. 끊겨도 이어서 받아요.";
   const t0 = performance.now();
   try {
     await masking.loadModels(renderModels);
     $("model-msg").textContent = `준비 완료 · ${Math.round(performance.now() - t0)}ms · ${masking.status.backend}`;
   } catch (e) {
     // 모델이 없으면 촬영하지 않는다 (가리지 못한 사진이 생기지 않게)
-    $("model-msg").textContent = "준비가 안 됐어요. 담당자에게 연락해 주세요.";
+    $("model-msg").textContent = "아직 다 받지 못했어요. 받은 것은 남아 있으니 '다시 준비하기'를 눌러 주세요. 계속 안 되면 담당자에게 연락해 주세요.";
     $("model-retry").hidden = false;
     console.warn("모델 준비 실패:", e.message);
     reportClientError("model", e, { status: { ...masking.status } });
