@@ -285,6 +285,11 @@ async function capture() {
   processRaw(raw, capturedAt, "camera");
 }
 
+async function measureBlob(blob) {
+  const bmp = await createImageBitmap(blob);
+  try { return quality.measure(bmp); } finally { bmp.close(); }
+}
+
 function afterPaint(ms) {
   return new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(res, ms))));
 }
@@ -304,6 +309,19 @@ async function processRaw(raw, capturedAt, source) {
     console.warn("가리기 실패:", e.message);                  // 사진 내용은 찍지 않음
     reportClientError("mask", e, { source });
     return showResult("한 번 더 찍어 주세요", "사진을 정리하지 못했어요. 계속 안 되면 담당자에게 연락해 주세요.",
+      fromFile ? "다른 사진 고르기" : "다시 찍기", again);
+  }
+  // 서버는 가리고 압축한 JPEG로 선명도를 잰다. 압축하면 값이 내려가므로 보낼 사진으로 한 번 더 잰다 (서버와 같은 판정)
+  const tq = performance.now();
+  const sent = await measureBlob(masked.blob);
+  masked.timings.check = Math.round(performance.now() - tq);
+  if (lastBurst && !fromFile) lastBurst.sentSharpness = Math.round(sent.sharpness * 10) / 10;
+  const bad = quality.problem(sent);
+  if (bad) {
+    reportClientError("quality-local", new Error(bad), { source, after: "encode",
+      sharpness: Math.round(sent.sharpness * 10) / 10, brightness: Math.round(sent.brightness * 10) / 10 });
+    return showResult(bad === "dark" ? "사진이 어두워요" : "사진이 흐려요",
+      bad === "dark" ? "밝은 쪽에서 다시 찍어 주세요." : "휴대폰을 잠깐 멈추고 한 번 더 찍어 주세요.",
       fromFile ? "다른 사진 고르기" : "다시 찍기", again);
   }
   const stop = patrol.stops[stopIdx];
@@ -333,7 +351,7 @@ function showPreview(item) {
     `얼굴 ${r.faces} · 번호판 ${r.plates} · 차량 ${r.vehicles}  (노랑 얼굴, 하늘 번호판, 분홍 차량)\n` +
     `촬영 ${item.test.size.captured.join("×")} → 전송 ${item.test.size.sent.join("×")}, ${(item.blob.size / 1024).toFixed(0)}KB` +
     `${item.test.blur ? "" : ", 흐림 미지원(모자이크 4칸)"}\n` +
-    `처리 ${t.total}ms = 얼굴 ${t.face} + 번호판 ${t.plate} + 차량 ${t.vehicle} + 가림 ${t.mask} + JPEG ${t.encode}` +
+    `처리 ${t.total}ms = 얼굴 ${t.face} + 번호판 ${t.plate} + 차량 ${t.vehicle} + 가림 ${t.mask} + JPEG ${t.encode}, 선명도 확인 ${t.check}ms` +
     (item.location ? `\n위치 ±${item.location.accuracy}m` : "") +
     `\n보낼 곳: ${item.stopName}${item.test.source === "file" ? " (저장된 사진 시험)" : ""}`;
   $("retake").textContent = item.test.source === "file" ? "다른 사진 고르기" : "다시 찍기";
