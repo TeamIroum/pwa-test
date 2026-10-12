@@ -394,7 +394,9 @@ $("pick-file").onchange = async (e) => {
 async function submit(item) {
   show("working");
   $("working-text").textContent = "사진을 보내고 있어요";
-  const { test, ...stored } = item;   // 시험 정보는 대기함에 넣지 않음
+  // 대기함에는 가린 위치(boxes) 없이 처리 시간·크기만 남긴다 (서버 기록용 시험 정보)
+  const { test, ...rest } = item;
+  const stored = test ? { ...rest, testInfo: { timings: test.timings, size: test.size, source: test.source, burst: test.burst } } : rest;
   try {
     await outbox.put(stored);          // 먼저 기기에 저장한 뒤 보낸다
   } catch (e) {
