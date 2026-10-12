@@ -1,0 +1,15 @@
+{
+  "name": "점검 사진 시험 (AI 모듈)",
+  "short_name": "점검 시험",
+  "description": "시니어 앱 기기 마스킹과 사진 제출을 AI 판독 모듈까지 이어 시험하는 PWA",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f5f1",
+  "theme_color": "#1f5f4a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

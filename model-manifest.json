@@ -1,0 +1,1 @@
+{"version": "e27e5afc", "files": {"face": "./models/face_yunet_s_dynamic@1.onnx?v=98473ed6405c", "plate": "./models/plate-t384@1.onnx?v=888397b96d76", "vehicle": "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite?v=4b59100025be"}}
