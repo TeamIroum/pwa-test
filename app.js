@@ -2,7 +2,7 @@
 // 앱은 AI 모듈을 부르지 않고 업무 API(/api/v1)만 부른다. 판독 결과는 어르신 화면에 보이지 않는다.
 import * as masking from "./masking.js";
 import * as outbox from "./outbox.js";
-import * as quality from "./quality.js";
+import * as camera from "./camera.js";
 
 const APP_VERSION = "pwa-test-0.1.0";
 const $ = (id) => document.getElementById(id);
@@ -38,7 +38,7 @@ function renderModels() {
     const cls = st === "준비" ? "st-ok" : st === "실패" ? "st-bad" : "";
     return `<li><span>${label}</span><span class="${cls}">${st}</span></li>`;
   }).join("");
-  $("start").disabled = !masking.ready();
+  $("start").disabled = $("collect").disabled = !masking.ready();
 }
 
 async function prepare() {
@@ -80,12 +80,12 @@ $("start").onclick = async () => {
     early = await patrolPrefetch;
     if (early) {
       applyPatrol(early);
-      showStop();
+      openPatrol();
       // 미리 받은 뒤 바뀐 상태 반영. 그새 촬영으로 넘어갔으면 건드리지 않는다
-      fetchPatrol().then((p) => { if (!$("stop").hidden) { applyPatrol(p); showStop(); } }).catch(() => {});
+      fetchPatrol().then((p) => { if (!$("stop").hidden) { applyPatrol(p); openPatrol(); } }).catch(() => {});
     } else {
       await loadPatrol();
-      showStop();
+      openPatrol();
     }
   } catch (e) {
     alert(`순회 정보를 받지 못했어요.
@@ -116,6 +116,13 @@ async function loadPatrol() {
 }
 
 const isResolved = (slot) => ["ACCEPTED", "REVIEW_REQUESTED"].includes(slot.captureStatus);
+const allResolved = () => patrol.stops.every((s) => s.captureSlots.every(isResolved));
+
+// 순회 시작: 모두 끝났으면 첫 장소를 다시 열지 않는다 (찍어 올려도 '이미 끝난 곳'으로 거절되기만 함)
+function openPatrol() {
+  if (allResolved()) return showResult("오늘 순회를 모두 마쳤어요", "더 찍을 곳이 없어요. 센터로 돌아가 주세요.", "처음으로", goHome);
+  showStop();
+}
 
 function currentSlot() {
   const stop = patrol.stops[stopIdx];
@@ -125,14 +132,17 @@ function currentSlot() {
 function showStop() {
   const stop = patrol.stops[stopIdx];
   const slot = currentSlot();
-  $("stop-step").textContent = `${stopIdx + 1} / ${patrol.stops.length} 번째 장소`;
+  $("stop-step").textContent = patrol.collect ? "현장 수집" : `${stopIdx + 1} / ${patrol.stops.length} 번째 장소`;
+  $("skip").textContent = patrol.collect ? "다른 시설" : "다음 장소로";
   $("stop-name").textContent = stop.name;
   $("stop-instruction").textContent = stop.instruction;
   const left = slot.retakesRemaining ?? 2;
   $("stop-slot").textContent = `찍을 모습: ${slot.label}` +
     (isResolved(slot) ? " · 이미 끝났어요" : slot.captureStatus === "RETAKE_REQUIRED" ? ` · 다시 찍기 ${left}번 남음` : "");
-  $("shoot").disabled = !masking.ready();
-  $("file-test").disabled = !masking.ready();
+  // 끝난 장소는 찍지 못하게 한다. 찍어도 사진을 다 올린 뒤에야 '이미 끝난 곳'이라는 답이 온다 (LTE에서는 몇 초 낭비)
+  const done = isResolved(slot);
+  $("shoot").disabled = !masking.ready() || done;
+  $("file-test").disabled = !masking.ready() || done;
   show("stop");
   showRetakeNotice();   // 촬영 중이라 미뤄 둔 '다시 찍을 곳' 알림
 }
@@ -152,62 +162,61 @@ async function refreshPatrol() {
   try { patrol = await api("GET", `/patrols/${patrol.id}`); } catch { /* 연결이 없으면 지금 정보로 계속 */ }
 }
 
-$("skip").onclick = () => goNext(null);
+$("skip").onclick = () => (patrol?.collect ? showCollectPick() : goNext(null));
 $("to-home").onclick = goHome;
 function goHome() { show("home"); updatePending(); showRetakeNotice(); }
 
-// ---------------------------------------------------------------- 카메라 (앱 안에서만 찍음. 갤러리·기본 카메라 앱을 쓰지 않음)
-let stream = null;
+// ---------------------------------------------------------------- 현장 수집 (시험용: AI 평가 사진 모으기)
+// 시설 종류를 골라 계속 찍는다. 업무 규칙(재촬영 상한·끝난 장소)이 없는 시험용 순회(patrol-collect)로 보낸다.
+// 찍는 방법·가리기·전송은 순회와 같다 (camera.js, outbox.js)
+const COLLECT_PATROL = "patrol-collect";
+$("collect").onclick = async () => {
+  navigator.storage?.persist?.().catch(() => {});
+  try { patrol = await api("GET", `/patrols/${COLLECT_PATROL}`); } catch (e) { return alert(`수집 정보를 받지 못했어요.\n${e.message}`); }
+  showCollectPick();
+};
+$("collect-home").onclick = goHome;
 
+// 이 휴대폰에서 시설별로 보낸 수 (보낸 기록 기준. 전송 대기 중인 것은 빼고 셈)
+async function collectCounts() {
+  const done = await outbox.results().catch(() => []);
+  const n = {};
+  for (const d of done) if (d.stopId?.startsWith("collect-")) n[d.stopId] = (n[d.stopId] || 0) + 1;
+  return n;
+}
+
+async function showCollectPick() {
+  const n = await collectCounts();
+  $("collect-list").innerHTML = patrol.stops.map((s, i) =>
+    `<button class="pick" data-i="${i}"><span>${escapeHtml(s.name)}</span><small>${n[s.id] || 0}장</small></button>`).join("");
+  const total = Object.values(n).reduce((a, b) => a + b, 0);
+  $("collect-total").textContent = `이 휴대폰에서 보낸 수집 사진 ${total}장 (전송 대기 제외)`;
+  show("collect-pick");
+}
+$("collect-list").onclick = (e) => {
+  const b = e.target.closest("button[data-i]");
+  if (!b) return;
+  stopIdx = +b.dataset.i;
+  showStop();
+};
+
+// ---------------------------------------------------------------- 카메라 (앱 안에서만 찍음. 갤러리·기본 카메라 앱을 쓰지 않음)
+// 촬영·가리기·흐림 확인은 camera.js가 한다. 여기서는 화면 전환과 시험 기록만 맡는다
 async function openCamera() {
   show("camera");
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false,
-    });
+    const res = await camera.open($("video"));
+    $("cam-res").textContent = `${res.width}×${res.height}`;
   } catch (e) {
     show("stop");
-    reportClientError("camera", e);
-    const why = e.name === "NotAllowedError" ? "카메라 사용을 허락하지 않았어요." : "카메라를 열지 못했어요.";
-    return showResult(why, "담당자에게 연락해 주세요.", "장소 안내로", showStop);
+    reportClientError("camera", e.cause || e);
+    return showResult(e.message, "담당자에게 연락해 주세요.", "장소 안내로", showStop);
   }
-  const video = $("video");
-  video.srcObject = stream;
-  await video.play().catch(() => {});
-  const s = stream.getVideoTracks()[0].getSettings();
-  $("cam-res").textContent = `${s.width || video.videoWidth}×${s.height || video.videoHeight}`;
 }
 
-function closeCamera() {
-  stream?.getTracks().forEach((t) => t.stop());
-  stream = null;
-  $("video").srcObject = null;
-}
-
-$("shoot").onclick = () => { unlockAudio(); openCamera(); };
-$("cam-cancel").onclick = () => { closeCamera(); showStop(); };
+$("shoot").onclick = () => { camera.unlockSound(); openCamera(); };
+$("cam-cancel").onclick = () => { camera.close($("video")); showStop(); };
 $("shutter").onclick = capture;
-
-// 브라우저 카메라는 촬영음이 없으므로 앱이 직접 낸다 (공개 장소 촬영 사실 알림)
-// Web Audio는 아이폰 무음 스위치를 따라 소리가 꺼진다. <audio> 요소 재생은 '미디어 재생'으로 취급돼 무음 모드에서도 난다
-let shutter = null;
-function unlockAudio() {
-  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch { /* 지원 안 함 */ }
-  if (shutter) return;
-  try {
-    shutter = new Audio(URL.createObjectURL(shutterWav()));
-    shutter.preload = "auto";
-    shutter.load();
-  } catch { shutter = null; /* 소리 없이 진행 */ }
-}
-function shutterSound() {
-  unlockAudio();   // 셔터를 누른 순간(사용자 동작 안)에 재생해야 iOS가 허용한다
-  if (!shutter) return;
-  try {
-    shutter.currentTime = 0;
-    shutter.play().catch(() => {});
-  } catch { /* 소리 없이 진행 */ }
-}
 
 // 촬영 순간 화면을 하얗게 한 번 번쩍인다. 소리는 휴대폰 볼륨을 따르므로 눈으로도 촬영 사실을 알린다
 function flashScreen() {
@@ -223,49 +232,6 @@ function flashScreen() {
   f.classList.add("on");
 }
 
-// 카메라 셔터 "찰-칵"을 WAV로 만든다. 파일을 따로 두지 않으려고 코드로 생성
-//   찰: 셔터가 열리는 날카로운 딸깍 / 칵: 약 70ms 뒤 닫히는 조금 낮고 묵직한 딸깍
-//   딸깍 하나 = 대역 필터를 거친 잡음(마찰) + 짧은 금속 울림 + 낮은 툭(몸체)
-function shutterWav() {
-  const rate = 44100, n = Math.floor(rate * 0.2);
-  const s = new Float32Array(n);
-  let seed = 7;
-  const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x3fffffff) - 1;   // 매번 같은 소리
-
-  function click(at, amp, center, decay, ring, thump) {
-    // 2차 대역 통과 필터 (RBJ biquad)
-    const w = (2 * Math.PI * center) / rate, q = 1.4, alpha = Math.sin(w) / (2 * q), a0 = 1 + alpha;
-    const b0 = alpha / a0, b2 = -alpha / a0, a1 = (-2 * Math.cos(w)) / a0, a2 = (1 - alpha) / a0;
-    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-    const start = Math.floor(at * rate);
-    for (let i = start; i < n; i++) {
-      const t = (i - start) / rate;
-      if (t > 0.08) break;
-      const x = rand();
-      const y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2;
-      x2 = x1; x1 = x; y2 = y1; y1 = y;
-      const attack = Math.min(1, t / 0.0004);                                   // 0.4ms 만에 올라옴
-      s[i] += amp * attack * (
-        2.2 * y * Math.exp(-t / decay) +                                        // 마찰음
-        0.35 * Math.sin(2 * Math.PI * ring * t) * Math.exp(-t / (decay * 2.5)) + // 금속 울림
-        0.6 * Math.sin(2 * Math.PI * thump * t) * Math.exp(-t / 0.012));       // 몸체 툭
-    }
-  }
-  click(0.000, 1.0, 4200, 0.0035, 2900, 190);   // 찰
-  click(0.068, 0.85, 3000, 0.0050, 2100, 140);  // 칵
-
-  let peak = 0;
-  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(s[i]));
-  const view = new DataView(new ArrayBuffer(44 + n * 2));
-  const str = (o, t) => { for (let i = 0; i < t.length; i++) view.setUint8(o + i, t.charCodeAt(i)); };
-  str(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); str(8, "WAVE");
-  str(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-  str(36, "data"); view.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, (s[i] / peak) * 0.95 * 0x7fff, true);   // 최대 음량으로 맞춤
-  return new Blob([view], { type: "audio/wav" });
-}
-
 function getLocation() {
   if (!cfg.location || !navigator.geolocation) return Promise.resolve(null);
   // 촬영 순간 한 번만 받는다 (이동 경로를 기록하지 않음)
@@ -276,111 +242,52 @@ function getLocation() {
 
 let pending = null;   // 확인 화면에 띄운 가린 사진 (원본 아님)
 
-// 사진은 카메라 영상에서 떼어 온 장면이라 셔터를 누르는 순간의 흔들림이 그대로 찍힌다.
-// 누른 뒤 약 0.3초 동안 몇 장면을 떼어 가장 선명한 것을 쓴다 (서버와 같은 선명도 계산, quality.js)
-const BURST_FRAMES = 5;
-const BURST_GAP_MS = 70;
-let lastBurst = null;   // 시험 정보: 고른 장면과 선명도
-
 async function capture() {
-  const video = $("video");
-  if (!video.videoWidth) return;
-  shutterSound();
-  flashScreen();
-  const capturedAt = new Date().toISOString();
-  let raw = null, spare = null, best = null;
-  for (let i = 0; i < BURST_FRAMES; i++) {
-    if (i) await new Promise((r) => setTimeout(r, BURST_GAP_MS));
-    const c = spare || document.createElement("canvas");
-    c.width = video.videoWidth;
-    c.height = video.videoHeight;
-    c.getContext("2d").drawImage(video, 0, 0);
-    const q = quality.measure(c);
-    if (!best || q.sharpness > best.sharpness) { spare = raw; raw = c; best = { ...q, frame: i }; } else spare = c;
-  }
-  lastBurst = { frames: BURST_FRAMES, picked: best.frame, sharpness: Math.round(best.sharpness * 10) / 10 };
-  if (spare) spare.width = spare.height = 0;   // 고르지 않은 장면은 바로 버린다 (원본을 남기지 않음)
-  closeCamera();
-
-  // 확실히 흐리거나 어두우면 올리지 않고 바로 다시 찍게 한다 (서버도 같은 기준으로 거절하므로 기다림·데이터만 아낌)
-  const bad = quality.problem(best);
-  if (bad) {
-    raw.width = raw.height = 0;
-    reportClientError("quality-local", new Error(bad), {
-      sharpness: Math.round(best.sharpness * 10) / 10, brightness: Math.round(best.brightness * 10) / 10 });
-    return showResult(bad === "dark" ? "사진이 어두워요" : "사진이 흐려요",
-      bad === "dark" ? "밝은 쪽에서 다시 찍어 주세요." : "휴대폰을 잠깐 멈추고 한 번 더 찍어 주세요.",
-      "다시 찍기", openCamera);
-  }
-  show("working");
-  // 가리기 계산은 화면 그리기를 1~3초 막는다(아이폰 WASM). 번쩍임이 실제로 그려진 뒤에 시작해야 보인다
-  await afterPaint(250);
-  processRaw(raw, capturedAt, "camera");
+  const locationP = getLocation();
+  const r = await camera.capture($("video"), { appVersion: APP_VERSION, onShutter: flashScreen, onProcessing: () => show("working") });
+  if (r) afterCapture(r, await locationP, "camera");
 }
 
-async function measureBlob(blob) {
-  const bmp = await createImageBitmap(blob);
-  // fast는 시험 기록용: 브라우저 줄이기 값과 비교해 기기 차이를 본다
-  try { return { ...quality.measure(bmp, { exact: true }), fast: quality.measure(bmp).sharpness }; } finally { bmp.close(); }
-}
-
-function afterPaint(ms) {
-  return new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(res, ms))));
-}
-
-// raw(원본 캔버스)를 가려서 확인 화면이나 전송으로 넘긴다. raw는 maskCapture 안에서 버려진다(크기 0)
-async function processRaw(raw, capturedAt, source) {
-  show("working");
+// camera.capture / camera.fromCanvas 결과를 확인 화면이나 전송으로 넘긴다
+function afterCapture(r, location, source) {
   const fromFile = source === "file";
   const again = fromFile ? pickFile : openCamera;
-  const locationP = fromFile ? Promise.resolve(null) : getLocation();
-
-  let masked;
-  try {
-    // 파일 시험은 서버 기록에서 카메라 촬영과 구분되게 appVersion에 표시
-    masked = await masking.maskCapture(raw, fromFile ? `${APP_VERSION}+file` : APP_VERSION);
-  } catch (e) {
-    console.warn("가리기 실패:", e.message);                  // 사진 내용은 찍지 않음
-    reportClientError("mask", e, { source });
-    return showResult("한 번 더 찍어 주세요", "사진을 정리하지 못했어요. 계속 안 되면 담당자에게 연락해 주세요.",
-      fromFile ? "다른 사진 고르기" : "다시 찍기", again);
-  }
-  // 서버는 가리고 압축한 JPEG로 선명도를 잰다. 압축하면 값이 내려가므로 보낼 사진으로 한 번 더 잰다 (서버와 같은 판정)
-  const tq = performance.now();
-  const sent = await measureBlob(masked.blob);
-  masked.timings.check = Math.round(performance.now() - tq);
-  if (lastBurst && !fromFile) Object.assign(lastBurst, {
-    sentSharpness: Math.round(sent.sharpness * 10) / 10, sentSharpnessFast: Math.round(sent.fast * 10) / 10 });
-  const bad = quality.problem(sent);
-  if (bad) {
-    reportClientError("quality-local", new Error(bad), { source, after: "encode",
-      sharpness: Math.round(sent.sharpness * 10) / 10, brightness: Math.round(sent.brightness * 10) / 10 });
-    return showResult(bad === "dark" ? "사진이 어두워요" : "사진이 흐려요",
-      bad === "dark" ? "밝은 쪽에서 다시 찍어 주세요." : "휴대폰을 잠깐 멈추고 한 번 더 찍어 주세요.",
-      fromFile ? "다른 사진 고르기" : "다시 찍기", again);
+  if (!r.ok) {
+    const { stage, error, burst, sent } = r.info;
+    const q = sent || burst;
+    reportClientError(r.reason === "mask" ? "mask" : "quality-local", new Error(error || r.reason), {
+      source, after: stage === "encode" ? "encode" : undefined, sharpness: q?.sharpness, brightness: q?.brightness });
+    const t = camera.RETAKE_TEXT[r.reason];
+    return showResult(t.title, t.sub, fromFile ? "다른 사진 고르기" : "다시 찍기", again,
+      patrol?.collect ? { homeLabel: "다른 시설", home: showCollectPick } : {});
   }
   const stop = patrol.stops[stopIdx];
   const slot = currentSlot();
+  const i = r.info;
   pending = {
     clientSubmissionId: crypto.randomUUID(), attemptId: crypto.randomUUID(),
     patrolId: patrol.id, stopId: stop.id, stopName: stop.name, captureSlotId: slot.id,
-    capturedAt, maskingVersion: masking.maskingVersion(), deviceMaskReport: masked.report,
-    blob: masked.blob, location: await locationP,
-    test: { boxes: masked.boxes, size: masked.size, timings: masked.timings, blur: masked.blur, source,
-      burst: fromFile ? null : lastBurst },
+    capturedAt: r.capturedAt, maskingVersion: r.maskingVersion, deviceMaskReport: r.report,
+    blob: r.blob, location,
+    test: { boxes: i.boxes, size: i.size, timings: i.timings, blur: i.blur, source, burst: i.burst },
   };
   if (cfg.preview || fromFile) return showPreview(pending);   // 파일 시험은 항상 가린 결과를 보여 줌
   submit(pending);
 }
 
 // ---------------------------------------------------------------- 확인 화면 (시험용)
+// 기기 번호판 검출 점수. 거짓 검출(창틀·책상 무늬 등)과 진짜 번호판의 점수를 모아 기준(masking.js PLATE_CONF)을 정한다
+const plateScores = (boxes) => (boxes || []).filter((b) => b.kind === "plate")
+  .map((b) => ({ score: b.score, box: b.box.map((v) => +v.toFixed(4)) }));
 let previewUrl = null;
 function showPreview(item) {
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = URL.createObjectURL(item.blob);
   $("preview-img").src = previewUrl;
-  $("preview-boxes").innerHTML = cfg.boxes ? item.test.boxes.map(({ kind, box: [x0, y0, x1, y1] }) =>
-    `<div class="bx ${kind}" style="left:${x0 * 100}%;top:${y0 * 100}%;width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%"></div>`).join("") : "";
+  $("preview-boxes").innerHTML = cfg.boxes ? item.test.boxes.map(({ kind, score, box: [x0, y0, x1, y1] }) =>
+    `<div class="bx ${kind}" style="left:${x0 * 100}%;top:${y0 * 100}%;width:${(x1 - x0) * 100}%;height:${(y1 - y0) * 100}%">` +
+    (kind === "plate" ? `<span>${score.toFixed(2)}</span>` : "") + "</div>").join("") : "";
+  const plates = plateScores(item.test.boxes);
   const r = item.deviceMaskReport, t = item.test.timings;
   $("preview-info").textContent =
     `얼굴 ${r.faces} · 번호판 ${r.plates} · 차량 ${r.vehicles}  (노랑 얼굴, 하늘 번호판, 분홍 차량)\n` +
@@ -388,6 +295,7 @@ function showPreview(item) {
     `${item.test.blur ? "" : ", 흐림 미지원(모자이크 4칸)"}\n` +
     `처리 ${t.total}ms = 얼굴 ${t.face} + 번호판 ${t.plate} + 차량 ${t.vehicle} + 가림 ${t.mask} + JPEG ${t.encode}, 선명도 확인 ${t.check}ms` +
     (item.location ? `\n위치 ±${item.location.accuracy}m` : "") +
+    (plates.length ? `\n번호판 점수: ${plates.map((p) => p.score.toFixed(2)).join(", ")} (기준 ${masking.PLATE_CONF})` : "") +
     `\n보낼 곳: ${item.stopName}${item.test.source === "file" ? " (저장된 사진 시험)" : ""}`;
   $("retake").textContent = item.test.source === "file" ? "다른 사진 고르기" : "다시 찍기";
   show("preview");
@@ -433,7 +341,8 @@ $("pick-file").onchange = async (e) => {
     raw.width = img.naturalWidth;
     raw.height = img.naturalHeight;
     raw.getContext("2d").drawImage(img, 0, 0);
-    processRaw(raw, new Date().toISOString(), "file");
+    // 파일 시험은 서버 기록에서 카메라 촬영과 구분되게 appVersion에 표시
+    afterCapture(await camera.fromCanvas(raw, { appVersion: `${APP_VERSION}+file` }), null, "file");
   } catch (err) {
     reportClientError("file-open", err, { type: file.type, size: file.size });
     showResult("사진을 열지 못했어요", "JPEG나 PNG 사진을 골라 주세요.", "다른 사진 고르기", pickFile);
@@ -449,7 +358,8 @@ async function submit(item) {
   $("working-text").textContent = "사진을 보내고 있어요";
   // 대기함에는 가린 위치(boxes) 없이 처리 시간·크기만 남긴다 (서버 기록용 시험 정보)
   const { test, ...rest } = item;
-  const stored = test ? { ...rest, testInfo: { timings: test.timings, size: test.size, source: test.source, burst: test.burst } } : rest;
+  const stored = test ? { ...rest, testInfo: { timings: test.timings, size: test.size, source: test.source, burst: test.burst,
+    plateScores: plateScores(test.boxes) } } : rest;
   try {
     await outbox.put(stored);          // 먼저 기기에 저장한 뒤 보낸다
   } catch (e) {
@@ -479,14 +389,19 @@ function handleResponse(r, test) {
   $("result-debug").innerHTML = escapeHtml(JSON.stringify(debug, null, 2)) +
     (b.testConsoleRunId ? `\n\n<a href="/#run-${b.testConsoleRunId}" target="_blank">검증 콘솔에서 판독 결과 보기</a>` : "");
 
+  if (patrol?.collect) return collectResult(r, b);
   if (!r.done) {
     if (r.offline || r.http >= 500 || b.code === "SUBMISSION_PROCESSING") {
       return showResult("전송 대기", "연결되면 자동으로 보낼게요. 다음 장소로 가셔도 돼요.", "다음 장소로", () => goNext(null));
     }
     return showResult("보내지 못했어요", `담당자에게 알려 주세요. (${b.code || r.http})`, "장소 안내로", showStop);
   }
-  if (b.code === "SLOT_RESOLVED") {
+  if (b.code === "SLOT_RESOLVED") {   // 검토로 넘긴 구도
     return showResult("이미 끝난 곳이에요", "다음 장소로 가 주세요.", "다음 장소로", () => goNext(null));
+  }
+  if (b.duplicate) {                  // 이미 채택된 구도: 200 + duplicate=true (명세서 6장)
+    refreshPatrol();
+    return showResult("이미 끝난 곳이에요", b.message || "다음 장소로 가 주세요.", "다음 장소로", () => goNext(b.nextStopId));
   }
   refreshPatrol();
   switch (b.nextAction) {
@@ -504,13 +419,30 @@ function handleResponse(r, test) {
   }
 }
 
-function showResult(text, sub, actionLabel, action) {
+// opts.homeLabel·opts.home: 아래 버튼 (기본 '처음으로')
+function showResult(text, sub, actionLabel, action, opts = {}) {
   $("result-text").textContent = text;
   $("result-sub").textContent = sub;
   $("result-action").textContent = actionLabel;
   $("result-action").onclick = action;
-  $("result-home").onclick = goHome;
+  $("result-home").textContent = opts.homeLabel || "처음으로";
+  $("result-home").onclick = opts.home || goHome;
   show("result");
+}
+
+// 현장 수집 결과: 같은 시설을 계속 찍거나 다른 시설로. 판독 결과는 화면에 띄우지 않고 콘솔 기록에서 본다
+async function collectResult(r, b) {
+  const name = patrol.stops[stopIdx].name;
+  const more = { homeLabel: "다른 시설", home: showCollectPick };
+  if (!r.done) {
+    if (r.offline || r.http >= 500 || b.code === "SUBMISSION_PROCESSING") {
+      return showResult("전송 대기", "연결되면 자동으로 보낼게요. 계속 찍어도 돼요.", "계속 찍기", openCamera, more);
+    }
+    return showResult("보내지 못했어요", `(${b.code || r.http}) ${b.message || b.detail || ""}`, "계속 찍기", openCamera, more);
+  }
+  const n = (await collectCounts())[patrol.stops[stopIdx].id] || 0;
+  const title = b.captureStatus === "RETAKE_REQUIRED" ? "흐리거나 어두워요" : "받았어요";
+  showResult(title, `${name} ${n}장째 · ${b.message || ""}`, "계속 찍기", openCamera, more);
 }
 
 // ---------------------------------------------------------------- 대기함·기록

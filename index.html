@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1f5f4a">
+  <meta name="theme-color" content="#d7ebfb">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="점검 시험">
-  <title>점검 사진 시험</title>
+  <title>동네 점검단 · 시험용</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
@@ -14,7 +14,10 @@
 </head>
 <body>
   <header class="bar">
-    <strong>점검 사진 시험</strong>
+    <span class="brand">
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8.5h2.6L8 6.3h8l1.4 2.2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5z"/><circle cx="12" cy="13.6" r="3.2"/></svg></span>
+      <span><strong>동네 점검단</strong><small>시험용 · 순회 시험·현장 수집</small></span>
+    </span>
     <span id="net" class="pill">연결 확인 중</span>
     <span id="pending" class="pill warn" hidden></span>
   </header>
@@ -22,7 +25,6 @@
   <main>
     <!-- 처음 화면 -->
     <section id="home" class="screen">
-      <h1>오늘 순회</h1>
       <div class="card">
         <h2>사진 가림 준비</h2>
         <ul id="model-status" class="status-list"></ul>
@@ -30,6 +32,8 @@
         <button id="model-retry" class="secondary" hidden>다시 준비하기</button>
       </div>
       <button id="start" class="primary big" disabled>순회 시작</button>
+      <!-- 시험용: AI 평가 사진 모으기. 시설 종류를 골라 계속 찍는다 (재촬영 상한·끝난 장소 없음). 실제 시니어 앱에는 두지 않음 -->
+      <button id="collect" class="outline big" disabled>현장 수집 <small>평가용 사진 모으기</small></button>
 
       <div class="card" id="pending-card" hidden>
         <h2>전송 대기</h2>
@@ -54,6 +58,15 @@
         <ul id="result-list" class="list small"></ul>
         <p class="hint">판독 결과는 어르신 화면에 나오지 않습니다. <a href="/#runs" target="_blank">검증 콘솔 기록</a>에서 확인하세요.</p>
       </details>
+    </section>
+
+    <!-- 현장 수집: 시설 고르기 -->
+    <section id="collect-pick" class="screen" hidden>
+      <h1>현장 수집</h1>
+      <p class="msg">찍을 시설을 고르세요. 고른 시설은 검증 콘솔 기록의 정답 라벨(시설)로 들어갑니다. 문제·등급은 콘솔에서 붙입니다.</p>
+      <div id="collect-list" class="pick-list"></div>
+      <p class="hint" id="collect-total"></p>
+      <button id="collect-home" class="secondary">처음으로</button>
     </section>
 
     <!-- 장소 안내 -->

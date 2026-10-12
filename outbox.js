@@ -4,15 +4,21 @@
 //   - 먼저 대기함에 영속 저장한 뒤 보낸다. 서버가 RECEIVED 또는 NO_MEDIA로 답하기 전에는 "전송 대기"로 둔다.
 //   - 503·연결 끊김은 접수가 아니다. 같은 clientSubmissionId/attemptId·같은 파일로 다시 보낸다.
 //   - 앱을 다시 열 때, 연결이 돌아올 때 대기 사진을 보낸다 (백그라운드 전송에 기대지 않음).
-const DB_NAME = "pwa-test-outbox";
+let dbName = "pwa-test-outbox";
 const STORE = "outbox";
 const LOG = "results";
+
+// 저장소 이름을 정한다 (시니어 앱은 자기 이름을 씀). 대기함을 처음 쓰기 전에 한 번 부른다
+export function configure({ dbName: name } = {}) {
+  if (dbp) throw new Error("대기함을 이미 열었습니다. configure는 처음 쓰기 전에 부르세요");
+  if (name) dbName = name;
+}
 
 let dbp;
 function db() {
   if (!dbp) {
     dbp = new Promise((res, rej) => {
-      const req = indexedDB.open(DB_NAME, 1);
+      const req = indexedDB.open(dbName, 1);
       req.onupgradeneeded = () => {
         req.result.createObjectStore(STORE, { keyPath: "clientSubmissionId" });
         req.result.createObjectStore(LOG, { keyPath: "clientSubmissionId" });
@@ -58,7 +64,8 @@ export function send(item, opts) {
   return inflight.get(id);
 }
 
-async function sendOnce(item, { apiBase }) {
+// opts: apiBase(업무 API 주소), headers(로그인 헤더 등), onUploaded(사진을 다 올린 순간. "보내는 중 → 결과 확인 중" 표시용)
+async function sendOnce(item, { apiBase, headers = {}, onUploaded }) {
   const fd = new FormData();
   fd.append("file", photo(item), `${item.clientSubmissionId}.jpg`);
   for (const k of ["clientSubmissionId", "captureSlotId", "attemptId", "capturedAt", "maskingVersion"]) fd.append(k, item[k]);
@@ -67,7 +74,7 @@ async function sendOnce(item, { apiBase }) {
   // 시험용 업무 API만 받는 시험 정보 (휴대폰 가림 처리 시간·크기). 검증 콘솔 기록에 남는다. 사진 내용은 없음
   const t = item.testInfo;
   if (t) fd.append("testClient", JSON.stringify({ maskTimings: t.timings, size: t.size,
-    bytes: item.blob?.size ?? item.bytes?.byteLength, source: t.source, burst: t.burst, userAgent: navigator.userAgent }));
+    bytes: item.blob?.size ?? item.bytes?.byteLength, source: t.source, burst: t.burst, plateScores: t.plateScores, userAgent: navigator.userAgent }));
   if (item.location) {
     fd.append("latitude", item.location.latitude);
     fd.append("longitude", item.location.longitude);
@@ -75,13 +82,12 @@ async function sendOnce(item, { apiBase }) {
   }
   let resp;
   try {
-    resp = await fetch(`${apiBase}/patrols/${item.patrolId}/stops/${item.stopId}/inspections`,
-      { method: "POST", body: fd, cache: "no-store" });
+    resp = await post(`${apiBase}/patrols/${item.patrolId}/stops/${item.stopId}/inspections`, fd, headers, onUploaded);
   } catch {
     await keep(item, { lastError: "연결 안 됨" });
     return { done: false, offline: true };
   }
-  const body = await resp.json().catch(() => ({}));
+  const body = resp.body;
   const receipt = body.receiptStatus;
   // 접수(RECEIVED)·사진 없는 품질 실패(NO_MEDIA)·이미 끝난 구도(SLOT_RESOLVED)는 최종 답이므로 대기함에서 뺀다
   const final = (resp.ok && (receipt === "RECEIVED" || receipt === "NO_MEDIA")) || body.code === "SLOT_RESOLVED";
@@ -93,8 +99,27 @@ async function sendOnce(item, { apiBase }) {
   }
   // 그 밖(503, 409 처리 중, 4xx 형식 오류)은 남겨 두고 이유를 적는다. 4xx 형식 오류는 자동으로 다시 보내지 않음(지우기 가능)
   const permanent = resp.status >= 400 && resp.status < 500 && body.code !== "SUBMISSION_PROCESSING";
-  await keep(item, { lastError: `${resp.status} ${body.code || ""} ${body.detail || ""}`.trim(), permanent });
+  await keep(item, { lastError: `${resp.status} ${body.code || ""} ${body.message || body.detail || ""}`.trim(), permanent });
   return { done: false, http: resp.status, body };
+}
+
+// fetch 대신 XHR: 사진을 다 올린 순간(upload.onload)을 알 수 있다. 로그인 쿠키도 함께 보낸다(withCredentials)
+// 연결이 끊기면 예외를 던진다 (fetch와 같음). 돌려주는 것: { status, ok, body }
+function post(url, body, headers, onUploaded) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", url);
+    x.withCredentials = true;
+    for (const [k, v] of Object.entries(headers)) x.setRequestHeader(k, v);
+    if (onUploaded) x.upload.onload = () => onUploaded();
+    x.onload = () => {
+      let parsed = {};
+      try { parsed = JSON.parse(x.responseText || "{}"); } catch { /* JSON이 아님 */ }
+      res({ status: x.status, ok: x.status >= 200 && x.status < 300, body: parsed });
+    };
+    x.onerror = x.ontimeout = x.onabort = () => rej(new Error("연결 안 됨"));
+    x.send(body);
+  });
 }
 
 // 실패 이유를 적어 다시 저장. 그사이 다른 경로가 이미 지웠으면 되살리지 않는다

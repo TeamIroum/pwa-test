@@ -59,7 +59,7 @@ export async function download(url, { model = false, what = "", onState = () => 
 export async function importRetry(url, onState) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await import(attempt ? `${url}?r=${attempt}` : url);
+      return await import(/* @vite-ignore */ attempt ? `${url}?r=${attempt}` : url);   // 시니어 앱(Vite)이 묶지 않게
     } catch (e) {
       if (attempt >= RETRY_WAIT_S.length) throw e;
       for (let s = RETRY_WAIT_S[attempt]; s > 0; s--) {
