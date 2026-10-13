@@ -1,6 +1,6 @@
 // 서비스 워커: 앱 화면·마스킹 모델·검출 라이브러리만 캐시한다.
 // 사진(원본·가린 사진)과 업무 API 응답은 캐시하지 않는다. 가린 사진은 IndexedDB 대기함에만 있다.
-const VERSION = "pwa-test-36";
+const VERSION = "pwa-test-37";
 const SHELL = `shell-${VERSION}`;
 const MODELS = "models-v1";        // 모델 주소에 내용 해시(?v=)가 붙어 있어 주소가 같으면 내용도 같다
 const SHELL_FILES = ["./", "index.html", "app.js", "masking.js", "outbox.js", "download.js", "quality.js", "camera.js", "style.css",

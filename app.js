@@ -427,6 +427,7 @@ function showResult(text, sub, actionLabel, action, opts = {}) {
   $("result-action").onclick = action;
   $("result-home").textContent = opts.homeLabel || "처음으로";
   $("result-home").onclick = opts.home || goHome;
+  $("result-home").hidden = action === (opts.home || goHome);   // 큰 버튼이 이미 '처음으로'면 하나만
   show("result");
 }
 
