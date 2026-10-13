@@ -1,131 +1,21 @@
-<!doctype html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#d7ebfb">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="점검 시험">
-  <title>동네 점검단 · 시험용</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <header class="bar">
-    <span class="brand">
-      <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8.5h2.6L8 6.3h8l1.4 2.2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19.5H4A1.5 1.5 0 0 1 2.5 18v-8A1.5 1.5 0 0 1 4 8.5z"/><circle cx="12" cy="13.6" r="3.2"/></svg></span>
-      <span><strong>동네 점검단</strong><small>시험용 · 순회 시험·현장 수집</small></span>
-    </span>
-    <span id="net" class="pill">연결 확인 중</span>
-    <span id="pending" class="pill warn" hidden></span>
-  </header>
-
-  <main>
-    <!-- 처음 화면 -->
-    <section id="home" class="screen">
-      <div class="card">
-        <h2>사진 가림 준비</h2>
-        <ul id="model-status" class="status-list"></ul>
-        <p id="model-msg" class="msg"></p>
-        <button id="model-retry" class="secondary" hidden>다시 준비하기</button>
-      </div>
-      <button id="start" class="primary big" disabled>순회 시작</button>
-      <!-- 시험용: AI 평가 사진 모으기. 시설 종류를 골라 계속 찍는다 (재촬영 상한·끝난 장소 없음). 실제 시니어 앱에는 두지 않음 -->
-      <button id="collect" class="outline big" disabled>현장 수집 <small>평가용 사진 모으기</small></button>
-
-      <div class="card" id="pending-card" hidden>
-        <h2>전송 대기</h2>
-        <p class="msg">아직 서버가 받지 않은 사진입니다. 연결되면 자동으로 보냅니다.</p>
-        <ul id="pending-list" class="list"></ul>
-        <button id="flush" class="secondary">지금 보내기</button>
-      </div>
-
-      <details class="card dev">
-        <summary>시험 설정 (담당자용)</summary>
-        <label>업무 API 주소 <input id="cfg-api" type="text" spellcheck="false"></label>
-        <label class="check"><input id="cfg-preview" type="checkbox"> 보내기 전에 가린 사진 확인</label>
-        <label class="check"><input id="cfg-boxes" type="checkbox"> 가린 위치 표시 (확인 화면에만, 전송 사진에는 없음)</label>
-        <label class="check"><input id="cfg-location" type="checkbox"> 촬영 위치 함께 보내기</label>
-        <div class="row">
-          <button id="selftest" class="secondary">얼굴 검출 점검</button>
-          <button id="reset-slots" class="secondary">구도 상태 초기화</button>
-          <button id="clear-log" class="secondary">보낸 기록 지우기</button>
-        </div>
-        <pre id="selftest-out" class="mono" hidden></pre>
-        <h3>보낸 기록</h3>
-        <ul id="result-list" class="list small"></ul>
-        <p class="hint">판독 결과는 어르신 화면에 나오지 않습니다. <a href="/#runs" target="_blank">검증 콘솔 기록</a>에서 확인하세요.</p>
-      </details>
-    </section>
-
-    <!-- 현장 수집: 시설 고르기 -->
-    <section id="collect-pick" class="screen" hidden>
-      <h1>현장 수집</h1>
-      <p class="msg">찍을 시설을 고르세요. 고른 시설은 검증 콘솔 기록의 정답 라벨(시설)로 들어갑니다. 문제·등급은 콘솔에서 붙입니다.</p>
-      <div id="collect-list" class="pick-list"></div>
-      <p class="hint" id="collect-total"></p>
-      <button id="collect-home" class="secondary">처음으로</button>
-    </section>
-
-    <!-- 장소 안내 -->
-    <section id="stop" class="screen" hidden>
-      <p class="step" id="stop-step"></p>
-      <h1 id="stop-name"></h1>
-      <p class="instruction" id="stop-instruction"></p>
-      <p class="slot" id="stop-slot"></p>
-      <button id="shoot" class="primary big">사진 찍기</button>
-      <!-- 시험용: 저장된 사진으로 앱 마스킹 확인. 실제 시니어 앱에는 두지 않음 (안내서 2장) -->
-      <button id="file-test" class="outline big">저장된 사진 고르기</button>
-      <input id="pick-file" type="file" accept="image/jpeg,image/png" hidden>
-      <div class="row">
-        <button id="skip" class="secondary">다음 장소로</button>
-        <button id="to-home" class="secondary">처음으로</button>
-      </div>
-    </section>
-
-    <!-- 카메라 -->
-    <section id="camera" class="screen camera" hidden>
-      <video id="video" playsinline muted></video>
-      <div class="camera-bar">
-        <button id="cam-cancel" class="ghost">취소</button>
-        <button id="shutter" class="shutter" aria-label="찍기"></button>
-        <span id="cam-res" class="cam-res"></span>
-      </div>
-    </section>
-
-    <!-- 처리 중 -->
-    <section id="working" class="screen center" hidden>
-      <div class="spinner"></div>
-      <p class="big-text" id="working-text">얼굴과 번호판을 가리고 있어요</p>
-    </section>
-
-    <!-- 가린 사진 확인 (시험 설정에서 켰을 때) -->
-    <section id="preview" class="screen" hidden>
-      <h1>가린 사진</h1>
-      <div class="photo"><img id="preview-img" alt="가린 사진"><div id="preview-boxes"></div></div>
-      <p id="preview-info" class="mono small"></p>
-      <div class="row">
-        <button id="send" class="primary">보내기</button>
-        <button id="retake" class="secondary">다시 찍기</button>
-      </div>
-    </section>
-
-    <!-- 결과 안내 -->
-    <section id="result" class="screen center" hidden>
-      <p class="big-text" id="result-text"></p>
-      <p class="msg" id="result-sub"></p>
-      <button id="result-action" class="primary big"></button>
-      <button id="result-home" class="secondary">처음으로</button>
-      <details class="card dev"><summary>시험 정보</summary><pre id="result-debug" class="mono small"></pre></details>
-    </section>
-  </main>
-
-  <!-- 촬영 순간 화면 번쩍임: 주변 사람이 촬영 사실을 눈으로도 알 수 있게 (볼륨을 낮추면 촬영음이 안 들리므로) -->
-  <div id="flash" class="flash" aria-hidden="true"></div>
-
-  <script src="config.js"></script>
-  <script type="module" src="app.js"></script>
-</body>
-</html>
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f4f6fa"><title>시니어 동네 점검단</title><style>
+:root{--bg:#f4f6fa;--ink:#191f28;--sub:#4e5968;--mute:#8b95a1;--brand:#2f6beb;--card:#fff;--line:#e5e8eb}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);
+font-family:Pretendard,-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif}
+main{max-width:440px;margin:0 auto;padding:56px 20px 40px;min-height:100dvh;display:flex;flex-direction:column;gap:14px}
+.logo{width:72px;height:72px;border-radius:22px;background:var(--brand);display:grid;place-items:center;box-shadow:0 10px 24px rgba(47,107,235,.35)}
+h1{margin:18px 0 0;font-size:2rem;letter-spacing:-.04em;line-height:1.2}
+p.sub{margin:6px 0 18px;color:var(--sub);font-size:1.05rem;line-height:1.55}
+a.go{display:flex;align-items:center;gap:14px;padding:20px;border-radius:22px;background:var(--card);color:var(--ink);
+text-decoration:none;box-shadow:0 2px 10px rgba(0,0,0,.06);border:1px solid var(--line)}
+a.go:active{transform:scale(.98)}a.go.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+a.go b{display:block;font-size:1.25rem}a.go span{display:block;margin-top:2px;font-size:.95rem;opacity:.8}
+a.go .arrow{margin-left:auto;font-size:1.5rem;opacity:.7}
+footer{margin-top:auto;padding-top:24px;color:var(--mute);font-size:.85rem;line-height:1.6}
+</style></head><body><main>
+<div class="logo"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></div>
+<h1>시니어 동네 점검단</h1>
+<p class="sub">어르신 점검원이 동네 시설을 사진으로 살피고,<br>담당 공무원이 AI 판독을 참고해 보수까지 관리합니다.</p>
+<a class="go primary" href="https://desktop-iv9p5jl.tail3f4b5a.ts.net/"><div><b>시니어 앱</b><span>점검원 어르신 · 휴대폰으로 열어 주세요</span></div><span class="arrow">›</span></a>
+<a class="go" href="https://desktop-iv9p5jl.tail3f4b5a.ts.net:10000/"><div><b>관리자 웹</b><span>활동 담당자 · 시설 담당자 · PC 브라우저</span></div><span class="arrow">›</span></a>
+<footer>팀 이로움 · 앱은 운영 서버에서 열립니다</footer></main></body></html>
