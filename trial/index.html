@@ -1,0 +1,37 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f4f6fa"><title>시니어 동네 점검단 체험판</title><style>
+:root{--bg:#f4f6fa;--ink:#191f28;--sub:#4e5968;--mute:#8b95a1;--brand:#2f6beb;--brand-soft:#e8f0fe;--card:#fff;--line:#e5e8eb}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);
+font-family:Pretendard,-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif}
+main{max-width:520px;margin:0 auto;padding:48px 20px 40px;display:flex;flex-direction:column;gap:14px}
+.logo{width:64px;height:64px;border-radius:20px;background:var(--brand);display:grid;place-items:center;box-shadow:0 10px 24px rgba(47,107,235,.35)}
+.tag{margin:14px 0 0;color:var(--brand);font-weight:700;font-size:.9rem}
+h1{margin:4px 0 0;font-size:2rem;letter-spacing:-.04em;line-height:1.2}
+p.sub{margin:6px 0 10px;color:var(--sub);font-size:1.02rem;line-height:1.6}
+a.go{display:flex;align-items:center;gap:14px;padding:20px;border-radius:22px;background:var(--card);color:var(--ink);
+text-decoration:none;box-shadow:0 2px 10px rgba(0,0,0,.06);border:1px solid var(--line)}
+a.go:active{transform:scale(.98)}a.go.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+a.go b{display:block;font-size:1.25rem}a.go span{display:block;margin-top:2px;font-size:.92rem;opacity:.85}
+a.go .arrow{margin-left:auto;font-size:1.5rem;opacity:.7}
+h2{margin:22px 0 4px;font-size:1.05rem}
+ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px}
+ol li{display:flex;gap:12px}ol li i{flex:none;width:28px;height:28px;border-radius:50%;background:var(--brand-soft);color:var(--brand);
+font-style:normal;font-weight:700;display:grid;place-items:center;font-size:.9rem}
+ol li b{display:block}ol li span{color:var(--sub);font-size:.92rem;line-height:1.5}
+.box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;color:var(--sub);font-size:.92rem;line-height:1.6}
+.qr{display:flex;gap:16px;align-items:center}.qr img{width:120px;height:120px;border-radius:12px;background:#fff;border:1px solid var(--line)}
+footer{margin-top:18px;color:var(--mute);font-size:.84rem;line-height:1.7}
+</style></head><body><main>
+<div class="logo"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></div>
+<p class="tag">팀 이로움 · 체험판</p>
+<h1>시니어 동네 점검단</h1>
+<p class="sub">어르신 두 분이 한 조로 동네 시설을 사진으로 살피고, 담당 공무원이 사진을 검토해 보수까지 이어 가는 서비스입니다. 아래에서 두 화면을 직접 눌러 보세요.</p>
+<a class="go primary" href="senior/"><div><b>시니어 앱</b><span>어르신 점검원 휴대폰 화면 · 로그인 없이 바로 체험</span></div><span class="arrow">›</span></a>
+<a class="go" href="admin/"><div><b>관리자 웹</b><span>활동 담당자·시설 담당자 화면 · 사진 검토와 보수 관리</span></div><span class="arrow">›</span></a>
+<h2>시니어 앱에서 해 볼 수 있는 하루</h2>
+<ol><li><i>1</i><div><b>바로 체험하기 → 센터에 도착했어요</b><span>체험판이라 로그인과 담당자 출석·출발 확인을 건너뜁니다.</span></div></li><li><i>2</i><div><b>활동 시작하기</b><span>오늘 코스의 장소와 찍을 구도가 차례로 안내됩니다.</span></div></li><li><i>3</i><div><b>도착했어요 · 사진 찍기</b><span>실제 카메라로 아무 시설이나 찍어 보세요. 사람 얼굴과 자동차 번호판은 휴대폰에서 먼저 마스킹됩니다. 카메라를 쓸 수 없으면 그림으로 촬영을 흉내 냅니다.</span></div></li><li><i>4</i><div><b>센터 복귀 → 관리자 웹에서 내 사진 보기</b><span>같은 휴대폰에서 관리자 웹을 열면 방금 찍은 사진이 검토 목록 맨 위에 보입니다.</span></div></li></ol>
+<h2>관리자 웹 로그인</h2>
+<div class="box">로그인 화면 아래 "시연용 계정"을 누르면 아이디와 비밀번호가 채워집니다. 그다음 로그인을 누르세요. 활동 담당자·시설 담당자·사업 총괄 메뉴(오늘 활동 현황, 검토 목록, 사건·보수, 통계)를 볼 수 있습니다.</div>
+<h2>다른 사람에게 알려 주기</h2>
+<div class="box qr"><img src="qr.png" alt="체험판 주소 QR 코드"><div>휴대폰 카메라로 찍으면 이 페이지가 열립니다.<br><b>https://teamiroum.github.io/service/trial/</b></div></div>
+<footer>체험판은 서버에 연결하지 않고 예시 데이터로만 움직입니다. 누른 내용과 찍은 사진은 이 브라우저 안에만 남고 어디로도 보내지 않으며, "처음부터 다시 체험하기"를 누르면 지워집니다.<br>
+화면 속 이름·전화번호·시설은 모두 가상입니다. 체험판에서는 AI 판독을 하지 않습니다. 실제 서비스에서는 서버의 AI가 시설 종류·이상 유형·판단 근거를 표시합니다.</footer></main></body></html>

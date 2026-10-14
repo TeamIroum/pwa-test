@@ -1,0 +1,8 @@
+{
+  "version": "6f73a410",
+  "files": {
+    "face": "./face_yunet_s_dynamic@1.onnx?v=98473ed6405c",
+    "plate": "./plate-t384@1.onnx?v=888397b96d76",
+    "vehicle": "./efficientdet_lite0@1.tflite?v=4b59100025be"
+  }
+}
